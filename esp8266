@@ -1,0 +1,143 @@
+#include <ESP8266WiFi.h>
+#include <AES.h>
+#include <AESLib.h>
+#include <AES_config.h>
+#include <xbase64.h>
+
+
+#include <dht.h>
+#define sensor  5  //D1
+dht DHT;
+
+//untuk aes
+AES aes;
+byte cipher[1000];
+char b64[1000];
+//pesan untuk encrypte
+//
+
+const char* ssid     = "Deana";
+const char* password = " password ";
+
+const char* host = "192.168.0.100";
+
+WiFiClient client;
+const int httpPort = 80;
+String url;
+long suhu;
+String suhu2;
+String hasil;
+unsigned long timeout;
+  
+void setup() {
+  Serial.begin(9600);
+  delay(10);
+  
+  // We start by connecting to a WiFi network
+  Serial.println();
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected");  
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void baca_suhu(){
+  DHT.read11(sensor);
+ 
+  delayMicroseconds(10); // Added this line
+ suhu=DHT.temperature;
+ suhu2=DHT.temperature;
+ Serial.print(DHT.temperature); 
+Serial.println(" C ");
+ // Serial.print(distance);
+ // Serial.println(" cm");
+}
+
+void do_encrypt(String msg,String key_str,String iv_str)
+{
+  byte iv[16];
+  //copy iv_str ke array
+  memcpy(iv,(byte *)iv_str.c_str(), 16);
+
+ //gunakan base 64 ke massage content
+ int blen=base64_encode(b64, (char *)msg.c_str(),msg.length());
+
+ //hitung output size
+ aes.calc_size_n_pad(blen);
+ //costum padding
+ int len=aes.get_size();
+ byte plain_p[len];
+ for(int i=0;i<blen;++i)plain_p[i]=b64[i];
+ for(int i=blen;i<len;++i)plain_p[i]='\0';
+ //do aes-128-cbc encrip
+
+ int blocks = len /16;
+ aes.set_key((byte *)key_str.c_str(),16);
+ aes.cbc_encrypt(plain_p,cipher, blocks,iv);
+ //base64 encoder to encode
+ base64_encode(b64,(char *)cipher,len);
+ Serial.println("Enkripsi data output datanya  "+String((char *)b64));
+ hasil = String((char *)b64);
+}
+
+void loop() {
+  String msg = suhu2;
+  String key_str = "aaaaaaaaaaaaaaaa";
+  String iv_str = "aaaaaaaaaaaaaaaa"; //16 byte
+do_encrypt(msg,key_str,iv_str);
+//do_encrypt;
+
+  Serial.print("baca Suhu");
+  baca_suhu();
+  
+  Serial.print("connecting to ");
+  Serial.println(host);
+
+  if (!client.connect(host, httpPort)) {
+    Serial.println("connection failed");
+    //return;
+  }
+
+// We now create a URI for the request
+  url = "/belajar/index.php/simpan/sensor?data=";
+ //url += suhu;
+  url += hasil;
+  Serial.print("Requesting URL: ");
+  Serial.println(url);
+
+// This will send the request to the server
+  client.print(String("GET ") + url + " HTTP/1.1\r\n" +
+               "Host: " + host + "\r\n" + 
+               "Connection: close\r\n\r\n");
+  timeout = millis();
+  while (client.available() == 0) {
+    if (millis() - timeout > 5000) {
+      Serial.println(">>> Client Timeout !");
+      client.stop();
+      return;
+    }
+  }
+
+// Read all the lines of the reply from server and print them to Serial
+  while(client.available()){
+    String line = client.readStringUntil('\r');
+    Serial.print(line);
+  }
+
+  Serial.println();
+  Serial.println("closing connection");
+  Serial.println();
+  delay(5000);
+}
